@@ -1,1 +1,214 @@
-asd
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS logs</title>
+  <!-- Include Bootstrap CSS -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+  <!-- Include MQTT.js library -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <h2>GPS Logs</h2>
+  <div class="mb-3">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="enableCheckbox" checked>
+      <label class="form-check-label" for="enableCheckbox">Enable</label>
+    </div>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="scrollToBottomCheckboxAbove">
+      <label class="form-check-label" for="scrollToBottomCheckboxAbove">Scroll to Bottom</label>
+    </div>
+  </div>
+  <div class="mb-3">
+    <button id="clearDataBtn" class="btn btn-danger">Clear Data</button>
+    <button id="downloadCsvBtn" class="btn btn-primary">Download CSV</button>
+  </div>
+  <div id="entriesCounter" class="mb-3">
+    Entries: <span id="entriesCount">0</span>
+  </div>
+  <div id="messages" class="table-responsive">
+    <table id="gpsTable" class="table table-bordered">
+      <thead class="thead-dark">
+        <tr>
+          <th colspan="4">GPS</th>
+          <th colspan="4">Accelerometer</th>
+        </tr>
+        <tr>
+          <th>Timestamp</th>
+          <th>Latitude</th>
+          <th>Longitude</th>
+          <th>Number of Satellites</th>
+          <th>Acceleration X (m/s<sup>2</sup>)</th>
+          <th>Acceleration Y (m/s<sup>2</sup>)</th>
+          <th>Acceleration Z (m/s<sup>2</sup>)</th>
+          <th>Time Diff (us)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="mb-3">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="scrollToBottomCheckboxBelow">
+      <label class="form-check-label" for="scrollToBottomCheckboxBelow">Scroll to Bottom</label>
+    </div>
+  </div>
+</div>
+
+<script>
+  // MQTT Broker Information
+  var broker = 'ws://nador.tzky.eu:9001';
+  var username = 'gps_sub';
+  var password = 'gps_sub';
+
+  // Create a unique client ID
+  var clientId = 'mqttjs_' + Math.random().toString(16).substr(2, 8);
+
+  // Connect to the MQTT broker
+  var client = mqtt.connect(broker, {
+    clientId: clientId,
+    username: username,
+    password: password
+  });
+
+  // Checkboxes
+  var enableCheckbox = document.getElementById('enableCheckbox');
+  var scrollToBottomCheckboxAbove = document.getElementById('scrollToBottomCheckboxAbove');
+  var scrollToBottomCheckboxBelow = document.getElementById('scrollToBottomCheckboxBelow');
+  var isReceivingData = enableCheckbox.checked;
+
+  // Buttons
+  var clearDataBtn = document.getElementById('clearDataBtn');
+  var downloadCsvBtn = document.getElementById('downloadCsvBtn');
+
+  clearDataBtn.addEventListener('click', function () {
+    clearData();
+  });
+
+  downloadCsvBtn.addEventListener('click', function () {
+    downloadCsv();
+  });
+
+  enableCheckbox.addEventListener('change', function () {
+    isReceivingData = enableCheckbox.checked;
+  });
+
+  scrollToBottomCheckboxAbove.addEventListener('change', function () {
+    scrollToBottomCheckboxBelow.checked = scrollToBottomCheckboxAbove.checked;
+  });
+
+  scrollToBottomCheckboxBelow.addEventListener('change', function () {
+    scrollToBottomCheckboxAbove.checked = scrollToBottomCheckboxBelow.checked;
+  });
+
+  function clearData() {
+    document.getElementById('gpsTable').getElementsByTagName('tbody')[0].innerHTML = '';
+    updateEntriesCounter();
+  }
+
+  function downloadCsv() {
+    var tableBody = document.getElementById('gpsTable').getElementsByTagName('tbody')[0];
+    var rows = tableBody.getElementsByTagName('tr');
+    var csvContent = [];
+
+    for (var i = 0; i < rows.length; i++) {
+      var cells = rows[i].getElementsByTagName('td');
+      var row = [];
+
+      for (var j = 0; j < cells.length; j++) {
+        row.push(cells[j].innerText);
+      }
+
+      csvContent.push(row.join(';'));
+    }
+
+    var csvData = csvContent.join('\n');
+    var blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    var link = document.createElement('a');
+
+    if (navigator.msSaveBlob) { // IE 10+
+      navigator.msSaveBlob(blob, 'gps_data.csv');
+    } else {
+      link.href = URL.createObjectURL(blob);
+      link.download = 'gps_data.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  }
+
+  function updateEntriesCounter() {
+    var entriesCount = document.getElementById('gpsTable').getElementsByTagName('tbody')[0].getElementsByTagName('tr').length;
+    document.getElementById('entriesCount').innerText = entriesCount;
+  }
+
+  client.on('connect', function () {
+    console.log('Connected to MQTT broker');
+    client.subscribe('gps');
+    // Set the checkbox to checked when connected
+    enableCheckbox.checked = true;
+    isReceivingData = true;
+  });
+
+  client.on('error', function (error) {
+    console.error('MQTT Error:', error);
+  });
+
+  client.on('close', function () {
+    console.log('Connection to MQTT broker closed');
+    // Set the checkbox to unchecked when disconnected
+    enableCheckbox.checked = false;
+    isReceivingData = false;
+  });
+
+  // Display received messages
+  client.on('message', function (topic, message) {
+    if (!isReceivingData) {
+      return;
+    }
+
+    // Parse CSV-like data
+    var csvData = message.toString();
+    var rows = csvData.split('\n');
+
+    // Update table body with new rows
+    var tableBody = document.getElementById('gpsTable').getElementsByTagName('tbody')[0];
+
+    for (var j = 0; j < rows.length; j++) {
+      var columns = rows[j].split(';');
+      var newRow = tableBody.insertRow(-1);
+
+      for (var k = 0; k < columns.length; k++) {
+        var cell = newRow.insertCell(k);
+        if (k === 0) {
+          // Format timestamp to HH:mm:ss
+          var timestamp = new Date(columns[k]);
+          cell.innerHTML = timestamp.toTimeString().split(' ')[0];
+        } else {
+          cell.innerHTML = columns[k];
+        }
+      }
+    }
+
+    // Update entries counter
+    updateEntriesCounter();
+
+    // Scroll to the bottom if enabled
+    if (scrollToBottomCheckboxAbove.checked || scrollToBottomCheckboxBelow.checked) {
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+  });
+</script>
+
+<!-- Include Bootstrap JS and Popper.js -->
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+
+</body>
+</html>
